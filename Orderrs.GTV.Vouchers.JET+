@@ -7,7 +7,8 @@ WITH CountryOrderStats AS (
       ELSE dcountry.country
     END AS country,
     DATE_TRUNC(fo.orderdatetime, DAY) AS orderdate,
-    COUNT(DISTINCT fo.orderid) AS order_count, 
+    COUNT(DISTINCT fo.orderid) AS orders, 
+    SUM(fo.gtv) AS GTV,
     SUM(ABS(fom.rpo_voucher_amount)) AS total_vouchercost,
     COUNTIF(fom.rpo_voucher_amount < 0) AS nr_vouchers_used
   FROM
@@ -63,7 +64,8 @@ AllJetPlusOrders AS (
 SELECT
   cos.country,
   cos.orderdate,
-  cos.order_count,
+  cos.orders,
+  cos.GTV,
   COALESCE(ajpo.all_jet_plus_orders, 0) AS all_jet_plus_orders, -- Join JET+ orders, handle nulls
   cos.total_vouchercost,
   cos.nr_vouchers_used

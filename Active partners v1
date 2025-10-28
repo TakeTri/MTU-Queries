@@ -1,0 +1,18 @@
+SELECT
+  frt.snapshot_dt AS base_date,
+  COUNT(DISTINCT frt.restaurantid) AS number_of_active_restaurants
+FROM
+  `just-data-warehouse.core_dwh.fact_restaurant_daily_snapshot` AS frt
+INNER JOIN
+  `just-data-warehouse.core_dwh.dim_restaurant` AS drt USING(restaurantid)
+LEFT JOIN
+  `just-data-warehouse.core_dwh.dim_restaurant_online_status` AS drtst USING(online_status_id)
+WHERE
+  drtst.active_status = '1' -- Filter for active restaurants
+  AND frt.snapshot_dt >= DATE('2024-01-01') -- Filter for dates starting from Jan 1, 2024
+  AND frt.snapshot_dt < CURRENT_DATE() -- Filter for dates up to (but not including) today
+GROUP BY
+  1 
+ORDER BY
+  base_date DESC -- Order by date descending
+;

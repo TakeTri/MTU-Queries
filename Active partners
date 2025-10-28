@@ -1,0 +1,25 @@
+WITH MonthlyLastDay AS (
+  -- Identify the last recorded day for each region within each month
+  SELECT
+    date,
+    region,
+    active_restaurants,
+    -- Assign a row number within each region/month, ordering by date descending
+    ROW_NUMBER() OVER (PARTITION BY region, DATE_TRUNC(date, MONTH) ORDER BY date DESC) as rn
+  FROM
+    `just-data-warehouse.weekly_trading.jet_active_restaurants_dynamic`
+)
+SELECT
+  -- Select the month (first day of the month)
+  DATE_TRUNC(date, MONTH) AS month,
+  region,
+  -- The active_restaurants count from the last recorded day of that month
+  active_restaurants
+FROM
+  MonthlyLastDay
+WHERE
+  -- Keep only the row corresponding to the last recorded day of the month
+  rn = 1
+ORDER BY
+  month DESC,
+  region ASC;

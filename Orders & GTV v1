@@ -1,0 +1,60 @@
+-- CTE for the last two full months (Orders & GTV)
+WITH CurrentPeriodOrdersGTV AS (
+  SELECT
+    CASE
+      WHEN dcountry.country IN ('DET', 'DEL') THEN 'DE'
+      WHEN dcountry.country = 'GB' THEN 'UK'
+      ELSE dcountry.country
+    END AS country,
+    CASE
+      WHEN fo.ordertypeid = 2 THEN "5002" -- Assuming ordertypeid is stored as string '2'
+      ELSE "5001"
+    END AS BU,
+    -- Removed the duplicate fo.ordertypeid AS BU
+    DATE_TRUNC(fo.orderdatetime, DAY) AS orderdate,
+    COUNT(DISTINCT fo.orderid) AS orders,
+    SUM(fo.gtv) AS GTV
+  FROM
+    `just-data-warehouse.core_dwh.fact_order` AS fo
+  LEFT JOIN
+    `just-data-warehouse.dwh.dim_country` AS dcountry ON dcountry.countryid = fo.countryid
+  WHERE
+    -- Dynamic Date Filter: Last two full months
+    fo.orderdatetime >= DATE_TRUNC(DATE_SUB(CURRENT_DATE(), INTERVAL 2 MONTH), MONTH)
+    AND fo.orderdatetime < DATE_TRUNC(CURRENT_DATE(), MONTH)
+  GROUP BY
+    1, 2, 3 -- Groups by country, BU (derived), and orderdate
+),
+-- CTE for the same two months last year (Orders & GTV)
+PriorYearOrdersGTV AS (
+  SELECT
+    CASE
+      WHEN dcountry.country IN ('DET', 'DEL') THEN 'DE'
+      WHEN dcountry.country = 'GB' THEN 'UK'
+      ELSE dcountry.country
+    END AS country,
+    CASE
+      WHEN fo.ordertypeid = 2 THEN "Delivery" -- Assuming ordertypeid is stored as string '2'
+      ELSE "Marketplace"
+    END AS BU,
+    DATE_TRUNC(fo.orderdatetime, DAY) AS orderdate,
+    COUNT(DISTINCT fo.orderid) AS orders,
+    SUM(fo.gtv) AS GTV
+  FROM
+    `just-data-warehouse.core_dwh.fact_order` AS fo
+  LEFT JOIN
+    `just-data-warehouse.dwh.dim_country` AS dcountry ON dcountry.countryid = fo.countryid
+  WHERE
+    -- Dynamic Date Filter: Same two months, last year
+    fo.orderdatetime >= DATE_TRUNC(DATE_SUB(CURRENT_DATE(), INTERVAL 14 MONTH), MONTH) -- 12 + 2 months ago
+    AND fo.orderdatetime < DATE_TRUNC(DATE_SUB(CURRENT_DATE(), INTERVAL 12 MONTH), MONTH) -- 12 months ago
+  GROUP BY
+    1, 2, 3 -- Groups by country, BU (derived), and orderdate
+)
+-- Final UNION of both periods
+SELECT country, orderdate, BU, orders, GTV FROM CurrentPeriodOrdersGTV
+UNION ALL
+SELECT country, orderdate, BU, orders, GTV FROM PriorYearOrdersGTV
+ORDER BY
+  country,
+  orderdate;

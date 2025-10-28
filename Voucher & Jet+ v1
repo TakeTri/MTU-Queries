@@ -1,0 +1,132 @@
+-- CTE for Voucher Stats (Last Two Months)
+WITH CurrentPeriodVouchers AS (
+  SELECT
+    CASE
+      WHEN dcountry.country IN ('DET', 'DEL') THEN 'DE'
+      WHEN dcountry.country = 'GB' THEN 'UK'
+      ELSE dcountry.country
+    END AS country,
+    DATE_TRUNC(fo.orderdatetime, DAY) AS orderdate,
+    SUM(ABS(fom.rpo_voucher_amount)) AS total_vouchercost,
+    COUNTIF(fom.rpo_voucher_amount < 0) AS nr_vouchers_used
+  FROM
+    `just-data-warehouse.core_dwh.fact_order` AS fo
+  LEFT JOIN
+    `just-data-warehouse.dwh.dim_country` AS dcountry ON dcountry.countryid = fo.countryid
+  LEFT JOIN
+    `just-data-warehouse.core_dwh.fact_order_margin` AS fom ON fo.orderid = fom.order_id
+  WHERE
+    fo.orderdatetime >= DATE_TRUNC(DATE_SUB(CURRENT_DATE(), INTERVAL 2 MONTH), MONTH)
+    AND fo.orderdatetime < DATE_TRUNC(CURRENT_DATE(), MONTH)
+    AND fom.order_date_time_utc >= DATE_TRUNC(DATE_SUB(CURRENT_DATE(), INTERVAL 2 MONTH), MONTH)
+    AND fom.order_date_time_utc < DATE_TRUNC(CURRENT_DATE(), MONTH)
+  GROUP BY
+    1, 2
+),
+CurrentPeriodJetPlus AS (
+  SELECT
+    CASE
+      WHEN dcountry.country IN ('DET', 'DEL') THEN 'DE'
+      WHEN dcountry.country = 'GB' THEN 'UK'
+      ELSE dcountry.country
+    END AS country,
+    DATE_TRUNC(fo.orderdatetime, DAY) AS orderdate,
+    COUNT(DISTINCT fo.orderid) AS all_jet_plus_orders
+  FROM
+    `just-data-warehouse.core_dwh.fact_order` AS fo
+  INNER JOIN
+    `just-data-warehouse.dwh.dim_order` AS ddo ON fo.orderid = ddo.orderid
+  INNER JOIN
+    `just-data-warehouse.datamart_mis_jet_plus.jet_plus_active_memberships_v2` AS am ON ddo.global_user_id = am.global_user_id AND DATE(fo.orderdatetime) = am.snapshot_date
+  LEFT JOIN
+    `just-data-warehouse.dwh.dim_country` AS dcountry ON fo.countryid = dcountry.countryid
+  WHERE
+    fo.orderdatetime >= DATE_TRUNC(DATE_SUB(CURRENT_DATE(), INTERVAL 2 MONTH), MONTH)
+    AND fo.orderdatetime < DATE_TRUNC(CURRENT_DATE(), MONTH)
+    AND fo.orderdatetime BETWEEN am.membership_start_date AND LEAST(am.membership_cancel_date, am.membership_expiry_date)
+    AND ddo.orderday >= DATE_TRUNC(DATE_SUB(CURRENT_DATE(), INTERVAL 2 MONTH), MONTH)
+    AND ddo.orderday < DATE_TRUNC(CURRENT_DATE(), MONTH)
+  GROUP BY
+    1, 2
+),
+-- CTE for Voucher Stats (Prior Year)
+PriorYearVouchers AS (
+  SELECT
+    CASE
+      WHEN dcountry.country IN ('DET', 'DEL') THEN 'DE'
+      WHEN dcountry.country = 'GB' THEN 'UK'
+      ELSE dcountry.country
+    END AS country,
+    DATE_TRUNC(fo.orderdatetime, DAY) AS orderdate,
+    SUM(ABS(fom.rpo_voucher_amount)) AS total_vouchercost,
+    COUNTIF(fom.rpo_voucher_amount < 0) AS nr_vouchers_used
+  FROM
+    `just-data-warehouse.core_dwh.fact_order` AS fo
+  LEFT JOIN
+    `just-data-warehouse.dwh.dim_country` AS dcountry ON dcountry.countryid = fo.countryid
+  LEFT JOIN
+    `just-data-warehouse.core_dwh.fact_order_margin` AS fom ON fo.orderid = fom.order_id
+  WHERE
+    fo.orderdatetime >= DATE_TRUNC(DATE_SUB(CURRENT_DATE(), INTERVAL 14 MONTH), MONTH)
+    AND fo.orderdatetime < DATE_TRUNC(DATE_SUB(CURRENT_DATE(), INTERVAL 12 MONTH), MONTH)
+    AND fom.order_date_time_utc >= DATE_TRUNC(DATE_SUB(CURRENT_DATE(), INTERVAL 14 MONTH), MONTH)
+    AND fom.order_date_time_utc < DATE_TRUNC(DATE_SUB(CURRENT_DATE(), INTERVAL 12 MONTH), MONTH)
+  GROUP BY
+    1, 2
+),
+PriorYearJetPlus AS (
+  SELECT
+    CASE
+      WHEN dcountry.country IN ('DET', 'DEL') THEN 'DE'
+      WHEN dcountry.country = 'GB' THEN 'UK'
+      ELSE dcountry.country
+    END AS country,
+    DATE_TRUNC(fo.orderdatetime, DAY) AS orderdate,
+    COUNT(DISTINCT fo.orderid) AS all_jet_plus_orders
+  FROM
+    `just-data-warehouse.core_dwh.fact_order` AS fo
+  INNER JOIN
+    `just-data-warehouse.dwh.dim_order` AS ddo ON fo.orderid = ddo.orderid
+  INNER JOIN
+    `just-data-warehouse.datamart_mis_jet_plus.jet_plus_active_memberships_v2` AS am ON ddo.global_user_id = am.global_user_id AND DATE(fo.orderdatetime) = am.snapshot_date
+  LEFT JOIN
+    `just-data-warehouse.dwh.dim_country` AS dcountry ON fo.countryid = dcountry.countryid
+  WHERE
+    fo.orderdatetime >= DATE_TRUNC(DATE_SUB(CURRENT_DATE(), INTERVAL 14 MONTH), MONTH)
+    AND fo.orderdatetime < DATE_TRUNC(DATE_SUB(CURRENT_DATE(), INTERVAL 12 MONTH), MONTH)
+    AND fo.orderdatetime BETWEEN am.membership_start_date AND LEAST(am.membership_cancel_date, am.membership_expiry_date)
+    AND ddo.orderday >= DATE_TRUNC(DATE_SUB(CURRENT_DATE(), INTERVAL 14 MONTH), MONTH)
+    AND ddo.orderday < DATE_TRUNC(DATE_SUB(CURRENT_DATE(), INTERVAL 12 MONTH), MONTH)
+  GROUP BY
+    1, 2
+),
+-- Combine Current Period Data
+CombinedCurrentPeriod AS (
+  SELECT
+    -- Use voucher stats as the base, as it relies on fact_order which should have all dates/countries
+    cpv.country,
+    cpv.orderdate,
+    COALESCE(cpjp.all_jet_plus_orders, 0) AS all_jet_plus_orders,
+    cpv.total_vouchercost,
+    cpv.nr_vouchers_used
+  FROM CurrentPeriodVouchers cpv
+  LEFT JOIN CurrentPeriodJetPlus cpjp ON cpv.country = cpjp.country AND cpv.orderdate = cpjp.orderdate
+),
+-- Combine Prior Year Data
+CombinedPriorYear AS (
+  SELECT
+    pyv.country,
+    pyv.orderdate,
+    COALESCE(pyjp.all_jet_plus_orders, 0) AS all_jet_plus_orders,
+    pyv.total_vouchercost,
+    pyv.nr_vouchers_used
+  FROM PriorYearVouchers pyv
+  LEFT JOIN PriorYearJetPlus pyjp ON pyv.country = pyjp.country AND pyv.orderdate = pyjp.orderdate
+)
+-- Final UNION of both periods
+SELECT country, orderdate, all_jet_plus_orders, total_vouchercost, nr_vouchers_used FROM CombinedCurrentPeriod
+UNION ALL
+SELECT country, orderdate, all_jet_plus_orders, total_vouchercost, nr_vouchers_used FROM CombinedPriorYear
+ORDER BY
+  country,
+  orderdate;

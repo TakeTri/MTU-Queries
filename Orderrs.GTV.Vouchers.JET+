@@ -1,0 +1,76 @@
+WITH CountryOrderStats AS (
+  -- Aggregate core order and voucher stats by country and date
+  SELECT
+    CASE
+      WHEN dcountry.country IN ('DET', 'DEL') THEN 'DE'
+      WHEN dcountry.country = 'GB' THEN 'UK'
+      ELSE dcountry.country
+    END AS country,
+    DATE_TRUNC(fo.orderdatetime, DAY) AS orderdate,
+    COUNT(DISTINCT fo.orderid) AS order_count, 
+    SUM(ABS(fom.rpo_voucher_amount)) AS total_vouchercost,
+    COUNTIF(fom.rpo_voucher_amount < 0) AS nr_vouchers_used
+  FROM
+    `just-data-warehouse.core_dwh.fact_order` AS fo
+  LEFT JOIN
+    `just-data-warehouse.dwh.dim_country` AS dcountry ON dcountry.countryid = fo.countryid
+  LEFT JOIN
+    `just-data-warehouse.core_dwh.fact_order_margin` AS fom ON fo.orderid = fom.order_id
+  WHERE
+    -- Dynamic Date Filter: Start of the month 2 months ago
+    fo.orderdatetime >= DATE_TRUNC(DATE_SUB(CURRENT_DATE(), INTERVAL 2 MONTH), MONTH)
+    -- Dynamic Date Filter: End of the last full month
+    AND fo.orderdatetime < DATE_TRUNC(CURRENT_DATE(), MONTH)
+    -- Also apply to fom date if it's crucial for filtering relevant margin data
+    AND fom.order_date_time_utc >= DATE_TRUNC(DATE_SUB(CURRENT_DATE(), INTERVAL 2 MONTH), MONTH)
+    AND fom.order_date_time_utc < DATE_TRUNC(CURRENT_DATE(), MONTH)
+  GROUP BY
+    1, 2
+),
+AllJetPlusOrders AS (
+  -- Aggregate JET+ orders separately by country and date
+  SELECT
+    CASE
+      WHEN dcountry.country IN ('DET', 'DEL') THEN 'DE'
+      WHEN dcountry.country = 'GB' THEN 'UK'
+      ELSE dcountry.country
+    END AS country,
+    DATE_TRUNC(fo.orderdatetime, DAY) AS orderdate,
+    COUNT(DISTINCT fo.orderid) AS all_jet_plus_orders -- Count distinct orders made by active members on that day
+  FROM
+    `just-data-warehouse.core_dwh.fact_order` AS fo
+  INNER JOIN
+    `just-data-warehouse.dwh.dim_order` AS ddo ON fo.orderid = ddo.orderid
+  INNER JOIN
+    `just-data-warehouse.datamart_mis_jet_plus.jet_plus_active_memberships_v2` AS am ON ddo.global_user_id = am.global_user_id AND DATE(fo.orderdatetime) = am.snapshot_date
+  LEFT JOIN
+    `just-data-warehouse.dwh.dim_country` AS dcountry ON fo.countryid = dcountry.countryid -- Join country here for grouping
+  WHERE
+    -- Dynamic Date Filter: Start of the month 2 months ago
+    fo.orderdatetime >= DATE_TRUNC(DATE_SUB(CURRENT_DATE(), INTERVAL 2 MONTH), MONTH)
+    -- Dynamic Date Filter: End of the last full month
+    AND fo.orderdatetime < DATE_TRUNC(CURRENT_DATE(), MONTH)
+    -- Membership validity check remains the same relative to the order datetime
+    AND fo.orderdatetime BETWEEN am.membership_start_date AND LEAST(am.membership_cancel_date, am.membership_expiry_date)
+    -- The ddo.orderday filter might still be relevant depending on its exact meaning, apply dynamic range if needed
+    -- Assuming orderday aligns with orderdatetime for filtering purposes:
+    AND ddo.orderday >= DATE_TRUNC(DATE_SUB(CURRENT_DATE(), INTERVAL 2 MONTH), MONTH)
+    AND ddo.orderday < DATE_TRUNC(CURRENT_DATE(), MONTH)
+  GROUP BY
+    1, 2
+)
+-- Final Select joining the two aggregations
+SELECT
+  cos.country,
+  cos.orderdate,
+  cos.order_count,
+  COALESCE(ajpo.all_jet_plus_orders, 0) AS all_jet_plus_orders, -- Join JET+ orders, handle nulls
+  cos.total_vouchercost,
+  cos.nr_vouchers_used
+FROM
+  CountryOrderStats AS cos
+LEFT JOIN
+  AllJetPlusOrders AS ajpo ON cos.country = ajpo.country AND cos.orderdate = ajpo.orderdate
+ORDER BY
+  cos.country,
+  cos.orderdate;
